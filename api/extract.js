@@ -20,11 +20,11 @@ Rules:
 - Dates as YYYY-MM-DD if determinable, else best guess, else empty string.
 - Money fields as plain numbers (no $ signs), 0 if not present.
 - "category" should be a short 1-3 word guess (e.g. "Supplies", "Job Invoice", "Equipment", "Utility").
+- "items" should list every item/product/service on the receipt, e.g. "2x Valve 3-way selector, Fuel surcharge"
+  or "Drill bits, 2in screws (box), Sandpaper x3, Work gloves". Unlike notes, this can run longer if needed.
 - "status" should be "Paid" if there's clear evidence of payment, otherwise "Unpaid".
 - "notes" is a short (<15 words) description of line items / job description.
 - If a field truly cannot be determined, use an empty string ("") or 0 for numbers. Never omit a key.`;
-- "items" should list every item/product/service on the receipt, e.g. "2x Valve 3-way selector, Fuel surcharge"
-  or "Drill bits, 2in screws (box), Sandpaper x3, Work gloves". Unlike notes, this can run longer if needed.
 
   try {
     const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
@@ -35,8 +35,7 @@ Rules:
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        //model: "claude-sonnet-5",
-        model: "claude-haiku-4-5-20251001",
+        model: "claude-sonnet-5",
         max_tokens: 1000,
         messages: [
           {
