@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ledger — Invoice Scanner</title>
+<style>
+  :root{
+    --paper:#F6F3EC;
+    --paper-dark:#EDE8DC;
+    --ink:#1E2A38;
+    --ink-soft:#5B6673;
+    --rule:#C9C0AC;
+    --stamp:#B4772C;
+    --stamp-dark:#8F5D1F;
+    --paid:#3E6E52;
+    --unpaid:#A3432F;
+    --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    --serif: Georgia, "Times New Roman", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    background-image:
+      repeating-linear-gradient(transparent, transparent 27px, rgba(30,42,56,0.035) 28px);
+    color:var(--ink);
+    font-family:var(--sans);
+    min-height:100vh;
+    padding-bottom:60px;
+  }
+  header{
+    padding:28px 20px 18px;
+    border-bottom:2px solid var(--ink);
+    position:relative;
+  }
+  header .eyebrow{
+    font-family:var(--mono);
+    font-size:11px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--ink-soft);
+  }
+  header h1{
+    font-family:var(--serif);
+    font-size:30px;
+    margin:4px 0 2px;
+    letter-spacing:0.01em;
+  }
+  header p{margin:0;color:var(--ink-soft);font-size:13.5px;}
+  .stamp-corner{
+    position:absolute;
+    top:22px;right:20px;
+    border:2px solid var(--stamp);
+    color:var(--stamp);
+    font-family:var(--mono);
+    font-size:10.5px;
+    font-weight:700;
+    letter-spacing:0.08em;
+    padding:5px 9px;
+    border-radius:4px;
+    transform:rotate(4deg);
+    opacity:0.85;
+  }
+  main{max-width:900px;margin:0 auto;padding:0 16px;}
+
+  .card{
+    background:#FFFDF9;
+    border:1px solid var(--rule);
+    border-radius:2px;
+    box-shadow:0 1px 0 var(--rule), 0 8px 20px -14px rgba(30,42,56,0.4);
+    margin-top:22px;
+    padding:20px;
+  }
+  .card h2{
+    font-family:var(--serif);
+    font-size:17px;
+    margin:0 0 14px;
+    padding-bottom:10px;
+    border-bottom:1px dashed var(--rule);
+  }
+
+  /* capture card */
+  .capture-row{display:flex;gap:10px;flex-wrap:wrap;}
+  .btn{
+    font-family:var(--sans);
+    font-size:14px;
+    font-weight:600;
+    padding:11px 18px;
+    border-radius:3px;
+    border:1.5px solid var(--ink);
+    background:var(--ink);
+    color:var(--paper);
+    cursor:pointer;
+    letter-spacing:0.01em;
+  }
+  .btn:active{transform:translateY(1px);}
+  .btn.secondary{background:transparent;color:var(--ink);}
+  .btn.stamp{background:var(--stamp);border-color:var(--stamp-dark);color:#fff;}
+  .btn:disabled{opacity:0.45;cursor:not-allowed;}
+  input[type=file]{display:none;}
+
+  .preview-wrap{margin-top:16px;display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;}
+  .preview-wrap img{
+    max-width:220px;max-height:280px;
+    border:1px solid var(--rule);
+    box-shadow:0 4px 10px -6px rgba(0,0,0,0.4);
+  }
+  .status-line{font-family:var(--mono);font-size:12.5px;color:var(--ink-soft);margin-top:10px;min-height:16px;}
+  .status-line.err{color:var(--unpaid);}
+
+  /* extracted form */
+  .field-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px;margin-top:4px;}
+  .field-grid .full{grid-column:1/-1;}
+  label{
+    display:block;font-family:var(--mono);font-size:10.5px;
+    text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);margin-bottom:4px;
+  }
+  input[type=text],input[type=number],input[type=date],select,textarea{
+    width:100%;font-family:var(--sans);font-size:14px;
+    padding:8px 9px;border:1px solid var(--rule);border-radius:2px;
+    background:#fff;color:var(--ink);
+  }
+  textarea{resize:vertical;min-height:44px;font-family:var(--sans);}
+  .field-grid input:focus,.field-grid select:focus{outline:2px solid var(--stamp);outline-offset:1px;}
+
+  /* log table */
+  .filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;}
+  .filters select,.filters input{
+    font-family:var(--mono);font-size:12.5px;padding:7px 8px;
+    border:1px solid var(--rule);border-radius:2px;background:#fff;
+  }
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  thead th{
+    text-align:left;font-family:var(--mono);font-size:10.5px;text-transform:uppercase;
+    letter-spacing:0.05em;color:var(--ink-soft);border-bottom:2px solid var(--ink);
+    padding:6px 8px;white-space:nowrap;cursor:pointer;
+  }
+  tbody td{padding:9px 8px;border-bottom:1px solid var(--paper-dark);vertical-align:top;}
+  tbody tr:hover{background:rgba(180,119,44,0.06);}
+  .num{font-family:var(--mono);text-align:right;white-space:nowrap;}
+  .badge{
+    font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:0.05em;
+    padding:2px 7px;border-radius:20px;display:inline-block;border:1px solid transparent;
+  }
+  .badge.unpaid{color:var(--unpaid);border-color:var(--unpaid);}
+  .badge.paid{color:var(--paid);border-color:var(--paid);}
+  .del-btn{background:none;border:none;color:var(--ink-soft);cursor:pointer;font-size:15px;}
+  .del-btn:hover{color:var(--unpaid);}
+  .empty-state{
+    text-align:center;padding:40px 10px;color:var(--ink-soft);font-family:var(--serif);font-style:italic;
+  }
+  .summary-bar{display:flex;gap:22px;flex-wrap:wrap;margin-bottom:16px;}
+  .summary-item .n{font-family:var(--mono);font-size:20px;font-weight:700;}
+  .summary-item .l{font-family:var(--mono);font-size:10px;text-transform:uppercase;color:var(--ink-soft);letter-spacing:0.05em;}
+  .top-actions{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;}
+  .private-note{font-family:var(--mono);font-size:11px;color:var(--ink-soft);}
+  @media(max-width:640px){.field-grid{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">Ledger No. 01 — Field Intake</div>
+  <h1>Invoice Scanner</h1>
+  <p>Photograph a receipt or invoice. It gets read, logged, and totaled automatically.</p>
+  <div class="stamp-corner">SCAN &amp; LOG</div>
+</header>
+
+<main>
+
+  <!-- CAPTURE CARD -->
+  <div class="card">
+    <h2>1. Capture an invoice</h2>
+    <div class="capture-row">
+      <label class="btn" for="cameraInput">📷 Take Photo</label>
+      <input id="cameraInput" type="file" accept="image/*" capture="environment">
+      <label class="btn secondary" for="fileInput">Upload from Library</label>
+      <input id="fileInput" type="file" accept="image/*">
+      <button class="btn stamp" id="extractBtn" disabled>Extract Data →</button>
+    </div>
+    <div class="preview-wrap" id="previewWrap" style="display:none;">
+      <img id="previewImg" alt="preview">
+      <div style="flex:1;min-width:200px;">
+        <div class="status-line" id="statusLine"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- REVIEW / EDIT CARD -->
+  <div class="card" id="reviewCard" style="display:none;">
+    <h2>2. Check the details, then save</h2>
+    <div class="field-grid">
+      <div><label>Vendor</label><input type="text" id="f_vendor"></div>
+      <div><label>Invoice #</label><input type="text" id="f_invoice"></div>
+      <div><label>Invoice Date</label><input type="date" id="f_date"></div>
+      <div><label>Due Date</label><input type="date" id="f_due"></div>
+      <div><label>Bill To / Customer</label><input type="text" id="f_billto"></div>
+      <div><label>Job Site / Location</label><input type="text" id="f_jobsite"></div>
+      <div><label>City</label><input type="text" id="f_city"></div>
+      <div><label>State</label><input type="text" id="f_state"></div>
+      <div><label>Category</label><input type="text" id="f_category"></div>
+      <div><label>Payment Status</label>
+        <select id="f_status"><option>Unpaid</option><option>Paid</option></select>
+      </div>
+      <div><label>Subtotal ($)</label><input type="number" step="0.01" id="f_subtotal"></div>
+      <div><label>Tax ($)</label><input type="number" step="0.01" id="f_tax"></div>
+      <div><label>Fees ($)</label><input type="number" step="0.01" id="f_fees"></div>
+      <div><label>Total Due ($)</label><input type="number" step="0.01" id="f_total"></div>
+      <div class="full"><label>Notes</label><textarea id="f_notes"></textarea></div>
+    </div>
+    <div class="capture-row" style="margin-top:16px;">
+      <button class="btn" id="saveBtn">Add to Log</button>
+      <button class="btn secondary" id="cancelBtn">Discard</button>
+    </div>
+  </div>
+
+  <!-- LOG CARD -->
+  <div class="card">
+    <h2>3. The log</h2>
+    <div class="top-actions">
+      <div class="summary-bar" id="summaryBar"></div>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <span class="private-note">shared log — visible to anyone with this link</span>
+        <button class="btn secondary" id="exportBtn">Export CSV</button>
+      </div>
+    </div>
+    <div class="filters">
+      <input type="text" id="searchBox" placeholder="Search vendor, invoice #, location…" style="min-width:220px;">
+      <select id="vendorFilter"><option value="">All vendors</option></select>
+      <select id="statusFilter">
+        <option value="">All statuses</option>
+        <option value="Unpaid">Unpaid</option>
+        <option value="Paid">Paid</option>
+      </select>
+    </div>
+    <div id="tableWrap">
+      <table id="logTable" style="display:none;">
+        <thead>
+          <tr>
+            <th data-key="date">Date</th>
+            <th data-key="vendor">Vendor</th>
+            <th data-key="invoice">Invoice #</th>
+            <th data-key="location">Location</th>
+            <th data-key="total">Total</th>
+            <th data-key="status">Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="logBody"></tbody>
+      </table>
+      <div class="empty-state" id="emptyState">No invoices logged yet — scan your first one above.</div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+let currentImage = null; // {base64, mediaType}
+let records = [];
+let sortKey = "date", sortDir = -1;
+
+const $ = id => document.getElementById(id);
+
+function toISO(d){
+  if(!d) return "";
+  // try to normalize common formats to YYYY-MM-DD
+  const m1 = d.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(m1) return d;
+  const m2 = d.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if(m2){
+    const mm = m2[1].padStart(2,"0"), dd = m2[2].padStart(2,"0");
+    return `${m2[3]}-${mm}-${dd}`;
+  }
+  return d;
+}
+
+// ---------- Image capture & resize ----------
+function handleFile(file){
+  if(!file) return;
+  const img = new Image();
+  const reader = new FileReader();
+  reader.onload = e => {
+    img.onload = () => {
+      const maxDim = 1600;
+      let {width,height} = img;
+      if(width > maxDim || height > maxDim){
+        const scale = maxDim / Math.max(width,height);
+        width = Math.round(width*scale); height = Math.round(height*scale);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width; canvas.height = height;
+      canvas.getContext("2d").drawImage(img,0,0,width,height);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+      currentImage = { base64: dataUrl.split(",")[1], mediaType: "image/jpeg" };
+      $("previewImg").src = dataUrl;
+      $("previewWrap").style.display = "flex";
+      $("extractBtn").disabled = false;
+      $("statusLine").textContent = "Ready to extract.";
+      $("statusLine").className = "status-line";
+      $("reviewCard").style.display = "none";
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+$("cameraInput").addEventListener("change", e => handleFile(e.target.files[0]));
+$("fileInput").addEventListener("change", e => handleFile(e.target.files[0]));
+
+// ---------- Extraction via Claude API ----------
+$("extractBtn").addEventListener("click", async () => {
+  if(!currentImage) return;
+  $("extractBtn").disabled = true;
+  $("statusLine").textContent = "Reading invoice…";
+  $("statusLine").className = "status-line";
+
+  const prompt = `You are extracting structured data from a photo of an invoice or receipt.
+Return ONLY a raw JSON object, no markdown fences, no preamble, with exactly these keys:
+vendor, invoice_number, invoice_date, due_date, bill_to, job_site, city, state, category,
+subtotal, tax, fees, total, status, notes.
+
+Rules:
+- Dates as YYYY-MM-DD if determinable, else best guess, else empty string.
+- Money fields as plain numbers (no $ signs), 0 if not present.
+- "category" should be a short 1-3 word guess (e.g. "Supplies", "Job Invoice", "Equipment", "Utility").
+- "status" should be "Paid" if there's clear evidence of payment, otherwise "Unpaid".
+- "notes" is a short (<15 words) description of line items / job description.
+- If a field truly cannot be determined, use an empty string ("") or 0 for numbers. Never omit a key.`;
+
+  try{
+    const response = await fetch("/api/extract", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ base64: currentImage.base64, mediaType: currentImage.mediaType })
+    });
+    if(!response.ok){
+      const errBody = await response.json().catch(()=>({}));
+      throw new Error(errBody.error || "Extraction request failed");
+    }
+    const parsed = await response.json();
+
+    $("f_vendor").value = parsed.vendor || "";
+    $("f_invoice").value = parsed.invoice_number || "";
+    $("f_date").value = toISO(parsed.invoice_date);
+    $("f_due").value = toISO(parsed.due_date);
+    $("f_billto").value = parsed.bill_to || "";
+    $("f_jobsite").value = parsed.job_site || "";
+    $("f_city").value = parsed.city || "";
+    $("f_state").value = parsed.state || "";
+    $("f_category").value = parsed.category || "";
+    $("f_status").value = (parsed.status === "Paid") ? "Paid" : "Unpaid";
+    $("f_subtotal").value = parsed.subtotal || 0;
+    $("f_tax").value = parsed.tax || 0;
+    $("f_fees").value = parsed.fees || 0;
+    $("f_total").value = parsed.total || 0;
+    $("f_notes").value = parsed.notes || "";
+
+    $("reviewCard").style.display = "block";
+    $("statusLine").textContent = "Extracted — review below and save.";
+    $("reviewCard").scrollIntoView({behavior:"smooth", block:"start"});
+  } catch(err){
+    console.error(err);
+    $("statusLine").textContent = "Couldn't read that invoice clearly — try retaking the photo with better light, or enter details manually below.";
+    $("statusLine").className = "status-line err";
+    $("reviewCard").style.display = "block";
+  } finally {
+    $("extractBtn").disabled = false;
+  }
+});
+
+$("cancelBtn").addEventListener("click", () => {
+  $("reviewCard").style.display = "none";
+  $("previewWrap").style.display = "none";
+  currentImage = null;
+  $("extractBtn").disabled = true;
+});
+
+// ---------- Storage ----------
+async function loadRecords(){
+  try{
+    const r = await fetch("/api/records");
+    records = r.ok ? await r.json() : [];
+  }catch(e){
+    records = [];
+  }
+  renderAll();
+}
+
+$("saveBtn").addEventListener("click", async () => {
+  const id = "id_" + Date.now() + "_" + Math.random().toString(36).slice(2,7);
+  const rec = {
+    id,
+    vendor: $("f_vendor").value.trim(),
+    invoice: $("f_invoice").value.trim(),
+    date: $("f_date").value,
+    due: $("f_due").value,
+    billto: $("f_billto").value.trim(),
+    jobsite: $("f_jobsite").value.trim(),
+    city: $("f_city").value.trim(),
+    state: $("f_state").value.trim(),
+    category: $("f_category").value.trim(),
+    status: $("f_status").value,
+    subtotal: parseFloat($("f_subtotal").value)||0,
+    tax: parseFloat($("f_tax").value)||0,
+    fees: parseFloat($("f_fees").value)||0,
+    total: parseFloat($("f_total").value)||0,
+    notes: $("f_notes").value.trim()
+  };
+  try{
+    const r = await fetch("/api/records", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(rec)
+    });
+    if(!r.ok) throw new Error("save failed");
+    records.push(rec);
+    renderAll();
+    $("reviewCard").style.display = "none";
+    $("previewWrap").style.display = "none";
+    currentImage = null;
+    $("extractBtn").disabled = true;
+    $("cameraInput").value = ""; $("fileInput").value = "";
+  }catch(e){
+    alert("Couldn't save this record — please try again.");
+  }
+});
+
+async function deleteRecord(id){
+  if(!confirm("Remove this invoice from the log?")) return;
+  try{
+    await fetch("/api/records?id=" + encodeURIComponent(id), { method:"DELETE" });
+    records = records.filter(r => r.id !== id);
+    renderAll();
+  }catch(e){ alert("Couldn't delete — try again."); }
+}
+
+// ---------- Render ----------
+function currentFiltered(){
+  const q = $("searchBox").value.trim().toLowerCase();
+  const vf = $("vendorFilter").value;
+  const sf = $("statusFilter").value;
+  let out = records.filter(r=>{
+    if(vf && r.vendor !== vf) return false;
+    if(sf && r.status !== sf) return false;
+    if(q){
+      const hay = `${r.vendor} ${r.invoice} ${r.jobsite} ${r.city} ${r.billto}`.toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  out.sort((a,b)=>{
+    let av=a[sortKey], bv=b[sortKey];
+    if(sortKey==="total"){ av=Number(av); bv=Number(bv); }
+    if(av<bv) return -1*sortDir;
+    if(av>bv) return 1*sortDir;
+    return 0;
+  });
+  return out;
+}
+
+function renderAll(){
+  // vendor filter options
+  const vendors = [...new Set(records.map(r=>r.vendor).filter(Boolean))].sort();
+  const vf = $("vendorFilter");
+  const prevVal = vf.value;
+  vf.innerHTML = '<option value="">All vendors</option>' + vendors.map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("");
+  vf.value = vendors.includes(prevVal) ? prevVal : "";
+
+  const filtered = currentFiltered();
+  const body = $("logBody");
+  if(filtered.length === 0){
+    $("logTable").style.display = "none";
+    $("emptyState").style.display = "block";
+  } else {
+    $("logTable").style.display = "table";
+    $("emptyState").style.display = "none";
+    body.innerHTML = filtered.map(r => `
+      <tr>
+        <td>${escapeHtml(r.date||"—")}</td>
+        <td>${escapeHtml(r.vendor||"—")}</td>
+        <td>${escapeHtml(r.invoice||"—")}</td>
+        <td>${escapeHtml([r.jobsite||r.billto, r.city, r.state].filter(Boolean).join(", "))}</td>
+        <td class="num">$${Number(r.total||0).toFixed(2)}</td>
+        <td><span class="badge ${r.status==='Paid'?'paid':'unpaid'}">${escapeHtml(r.status||'Unpaid')}</span></td>
+        <td><button class="del-btn" title="Delete" onclick="deleteRecord('${r.id}')">✕</button></td>
+      </tr>
+    `).join("");
+  }
+
+  // summary
+  const total = records.reduce((s,r)=>s+Number(r.total||0),0);
+  const unpaid = records.filter(r=>r.status!=='Paid').reduce((s,r)=>s+Number(r.total||0),0);
+  const paid = total - unpaid;
+  $("summaryBar").innerHTML = `
+    <div class="summary-item"><div class="n">${records.length}</div><div class="l">Invoices</div></div>
+    <div class="summary-item"><div class="n">$${total.toFixed(2)}</div><div class="l">Total</div></div>
+    <div class="summary-item"><div class="n">$${unpaid.toFixed(2)}</div><div class="l">Unpaid</div></div>
+    <div class="summary-item"><div class="n">$${paid.toFixed(2)}</div><div class="l">Paid</div></div>
+  `;
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+$("searchBox").addEventListener("input", renderAll);
+$("vendorFilter").addEventListener("change", renderAll);
+$("statusFilter").addEventListener("change", renderAll);
+document.querySelectorAll("thead th[data-key]").forEach(th=>{
+  th.addEventListener("click", ()=>{
+    const key = th.dataset.key;
+    if(sortKey===key) sortDir *= -1; else { sortKey=key; sortDir=1; }
+    renderAll();
+  });
+});
+
+$("exportBtn").addEventListener("click", ()=>{
+  const rows = currentFiltered();
+  const headers = ["Date","Vendor","Invoice #","Bill To","Job Site","City","State","Category","Subtotal","Tax","Fees","Total","Status","Notes"];
+  const csvRows = [headers.join(",")];
+  rows.forEach(r=>{
+    const line = [r.date,r.vendor,r.invoice,r.billto,r.jobsite,r.city,r.state,r.category,r.subtotal,r.tax,r.fees,r.total,r.status,r.notes]
+      .map(v => `"${String(v||"").replace(/"/g,'""')}"`).join(",");
+    csvRows.push(line);
+  });
+  const blob = new Blob([csvRows.join("\n")], {type:"text/csv"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "invoice_log.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+loadRecords();
+</script>
+</body>
+</html>
