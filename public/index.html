@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ledger — Invoice Scanner</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
     --paper:#F6F3EC;
@@ -208,6 +209,7 @@
       <div><label>Tax ($)</label><input type="number" step="0.01" id="f_tax"></div>
       <div><label>Fees ($)</label><input type="number" step="0.01" id="f_fees"></div>
       <div><label>Total Due ($)</label><input type="number" step="0.01" id="f_total"></div>
+      <div class="full"><label>Item / Description</label><textarea id="f_items"></textarea></div>
       <div class="full"><label>Notes</label><textarea id="f_notes"></textarea></div>
     </div>
     <div class="capture-row" style="margin-top:16px;">
@@ -224,6 +226,7 @@
       <div style="display:flex; gap:10px; align-items:center;">
         <span class="private-note">shared log — visible to anyone with this link</span>
         <button class="btn secondary" id="exportBtn">Export CSV</button>
+        <button class="btn secondary" id="exportXlsxBtn">Export Excel</button>
       </div>
     </div>
     <div class="filters">
@@ -354,6 +357,7 @@ Rules:
     $("f_tax").value = parsed.tax || 0;
     $("f_fees").value = parsed.fees || 0;
     $("f_total").value = parsed.total || 0;
+    $("f_items").value = parsed.items || "";
     $("f_notes").value = parsed.notes || "";
 
     $("reviewCard").style.display = "block";
@@ -401,6 +405,7 @@ $("saveBtn").addEventListener("click", async () => {
     state: $("f_state").value.trim(),
     category: $("f_category").value.trim(),
     status: $("f_status").value,
+    items: $("f_items").value.trim(),
     subtotal: parseFloat($("f_subtotal").value)||0,
     tax: parseFloat($("f_tax").value)||0,
     fees: parseFloat($("f_fees").value)||0,
@@ -517,10 +522,10 @@ document.querySelectorAll("thead th[data-key]").forEach(th=>{
 
 $("exportBtn").addEventListener("click", ()=>{
   const rows = currentFiltered();
-  const headers = ["Date","Vendor","Invoice #","Bill To","Job Site","City","State","Category","Subtotal","Tax","Fees","Total","Status","Notes"];
+  const headers = ["Date","Vendor","Invoice #","Bill To","Job Site","City","State","Category","Item/Description","Subtotal","Tax","Fees","Total","Status","Notes"];
   const csvRows = [headers.join(",")];
   rows.forEach(r=>{
-    const line = [r.date,r.vendor,r.invoice,r.billto,r.jobsite,r.city,r.state,r.category,r.subtotal,r.tax,r.fees,r.total,r.status,r.notes]
+    const line = [r.date,r.vendor,r.invoice,r.billto,r.jobsite,r.city,r.state,r.category,r.items,r.subtotal,r.tax,r.fees,r.total,r.status,r.notes]
       .map(v => `"${String(v||"").replace(/"/g,'""')}"`).join(",");
     csvRows.push(line);
   });
@@ -530,6 +535,19 @@ $("exportBtn").addEventListener("click", ()=>{
   a.href = url; a.download = "invoice_log.csv";
   a.click();
   URL.revokeObjectURL(url);
+});
+
+$("exportXlsxBtn").addEventListener("click", ()=>{
+  const data = currentFiltered().map(r=>({
+    Date:r.date, Vendor:r.vendor, "Invoice #":r.invoice, "Bill To":r.billto,
+    "Job Site":r.jobsite, City:r.city, State:r.state, Category:r.category,
+    "Item/Description":r.items, Subtotal:r.subtotal, Tax:r.tax, Fees:r.fees,
+    Total:r.total, Status:r.status, Notes:r.notes
+  }));
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Invoices");
+  XLSX.writeFile(wb, "invoice_log.xlsx");
 });
 
 loadRecords();
