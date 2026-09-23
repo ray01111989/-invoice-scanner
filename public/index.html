@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ledger — Invoice Scanner</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <style>
   :root{
     --paper:#F6F3EC;
@@ -224,7 +224,7 @@
     <div class="top-actions">
       <div class="summary-bar" id="summaryBar"></div>
       <div style="display:flex; gap:10px; align-items:center;">
-        <span class="private-note">shared log — visible to anyone with this link</span>
+        <span class="private-note">shared log — visible to anyone with access</span>
         <button class="btn secondary" id="exportBtn">Export CSV</button>
         <button class="btn secondary" id="exportXlsxBtn">Export Excel</button>
       </div>
@@ -265,6 +265,27 @@ let records = [];
 let sortKey = "date", sortDir = -1;
 
 const $ = id => document.getElementById(id);
+
+// ---------- API helper ----------
+// Every call to the server goes through here. If the server requires an access key it answers
+// 401; we then ask the person for the key once, remember it for this browser tab only
+// (sessionStorage), and retry the request.
+async function apiFetch(url, options = {}){
+  const headers = { ...(options.headers || {}) };
+  const saved = sessionStorage.getItem("accessKey");
+  if(saved) headers["x-access-key"] = saved;
+  let res = await fetch(url, { ...options, headers });
+  if(res.status === 401){
+    const entered = prompt("Enter the access key for this log:");
+    if(!entered) return res;
+    sessionStorage.setItem("accessKey", entered);
+    headers["x-access-key"] = entered;
+    res = await fetch(url, { ...options, headers });
+    // A wrong key is forgotten so the next attempt asks again.
+    if(res.status === 401) sessionStorage.removeItem("accessKey");
+  }
+  return res;
+}
 
 function toISO(d){
   if(!d) return "";
@@ -312,27 +333,15 @@ $("cameraInput").addEventListener("change", e => handleFile(e.target.files[0]));
 $("fileInput").addEventListener("change", e => handleFile(e.target.files[0]));
 
 // ---------- Extraction via Claude API ----------
+// The prompt lives on the server (api/extract.js); the page only sends the photo.
 $("extractBtn").addEventListener("click", async () => {
   if(!currentImage) return;
   $("extractBtn").disabled = true;
   $("statusLine").textContent = "Reading invoice…";
   $("statusLine").className = "status-line";
 
-  const prompt = `You are extracting structured data from a photo of an invoice or receipt.
-Return ONLY a raw JSON object, no markdown fences, no preamble, with exactly these keys:
-vendor, invoice_number, invoice_date, due_date, bill_to, job_site, city, state, category,
-subtotal, tax, fees, total, status, notes.
-
-Rules:
-- Dates as YYYY-MM-DD if determinable, else best guess, else empty string.
-- Money fields as plain numbers (no $ signs), 0 if not present.
-- "category" should be a short 1-3 word guess (e.g. "Supplies", "Job Invoice", "Equipment", "Utility").
-- "status" should be "Paid" if there's clear evidence of payment, otherwise "Unpaid".
-- "notes" is a short (<15 words) description of line items / job description.
-- If a field truly cannot be determined, use an empty string ("") or 0 for numbers. Never omit a key.`;
-
   try{
-    const response = await fetch("/api/extract", {
+    const response = await apiFetch("/api/extract", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({ base64: currentImage.base64, mediaType: currentImage.mediaType })
@@ -383,7 +392,7 @@ $("cancelBtn").addEventListener("click", () => {
 // ---------- Storage ----------
 async function loadRecords(){
   try{
-    const r = await fetch("/api/records");
+    const r = await apiFetch("/api/records");
     const data = r.ok ? await r.json() : [];
     records = Array.isArray(data) ? data : [];
     if(r.ok && !Array.isArray(data)){
@@ -417,7 +426,7 @@ $("saveBtn").addEventListener("click", async () => {
     notes: $("f_notes").value.trim()
   };
   try{
-    const r = await fetch("/api/records", {
+    const r = await apiFetch("/api/records", {
       method: "POST",
       headers: {"Content-Type":"application/json"},
       body: JSON.stringify(rec)
@@ -440,8 +449,10 @@ $("saveBtn").addEventListener("click", async () => {
 async function deleteRecord(id){
   if(!confirm("Remove this invoice from the log?")) return;
   try{
-    await fetch("/api/records?id=" + encodeURIComponent(id), { method:"DELETE" });
-    records = records.filter(r => r.id !== id);
+    const r = await apiFetch("/api/records?id=" + encodeURIComponent(id), { method:"DELETE" });
+    // Only remove the row locally if the server confirmed the delete.
+    if(!r.ok) throw new Error("delete failed with status " + r.status);
+    records = records.filter(rec => rec.id !== id);
     renderAll();
   }catch(e){ alert("Couldn't delete — try again."); }
 }
@@ -486,6 +497,8 @@ function renderAll(){
   } else {
     $("logTable").style.display = "table";
     $("emptyState").style.display = "none";
+    // The record id goes into a data attribute (escaped) instead of an inline onclick,
+    // so a crafted id can never run as script. Clicks are handled by the listener below.
     body.innerHTML = filtered.map(r => `
       <tr>
         <td>${escapeHtml(r.date||"—")}</td>
@@ -494,7 +507,7 @@ function renderAll(){
         <td>${escapeHtml([r.jobsite||r.billto, r.city, r.state].filter(Boolean).join(", "))}</td>
         <td class="num">$${Number(r.total||0).toFixed(2)}</td>
         <td><span class="badge ${r.status==='Paid'?'paid':'unpaid'}">${escapeHtml(r.status||'Unpaid')}</span></td>
-        <td><button class="del-btn" title="Delete" onclick="deleteRecord('${r.id}')">✕</button></td>
+        <td><button class="del-btn" title="Delete" data-id="${escapeHtml(r.id)}">✕</button></td>
       </tr>
     `).join("");
   }
@@ -515,6 +528,20 @@ function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// Delete buttons are created dynamically, so one listener on the table body handles them all.
+$("logBody").addEventListener("click", e => {
+  const btn = e.target.closest(".del-btn");
+  if(btn) deleteRecord(btn.dataset.id);
+});
+
+// Spreadsheet programs treat cells that start with = + - or @ as formulas, which lets a
+// malicious value run commands or leak data when the export is opened. Prefixing an
+// apostrophe forces such cells to be read as plain text. Numbers are left untouched.
+function safeCell(v){
+  if(typeof v !== "string") return v;
+  return /^[=+\-@\t\r]/.test(v) ? "'" + v : v;
+}
+
 $("searchBox").addEventListener("input", renderAll);
 $("vendorFilter").addEventListener("change", renderAll);
 $("statusFilter").addEventListener("change", renderAll);
@@ -532,7 +559,7 @@ $("exportBtn").addEventListener("click", ()=>{
   const csvRows = [headers.join(",")];
   rows.forEach(r=>{
     const line = [r.date,r.vendor,r.invoice,r.billto,r.jobsite,r.city,r.state,r.category,r.items,r.subtotal,r.tax,r.fees,r.total,r.status,r.notes]
-      .map(v => `"${String(v||"").replace(/"/g,'""')}"`).join(",");
+      .map(v => `"${String(safeCell(v||"")).replace(/"/g,'""')}"`).join(",");
     csvRows.push(line);
   });
   const blob = new Blob([csvRows.join("\n")], {type:"text/csv"});
@@ -545,10 +572,10 @@ $("exportBtn").addEventListener("click", ()=>{
 
 $("exportXlsxBtn").addEventListener("click", ()=>{
   const data = currentFiltered().map(r=>({
-    Date:r.date, Vendor:r.vendor, "Invoice #":r.invoice, "Bill To":r.billto,
-    "Job Site":r.jobsite, City:r.city, State:r.state, Category:r.category,
-    "Item/Description":r.items, Subtotal:r.subtotal, Tax:r.tax, Fees:r.fees,
-    Total:r.total, Status:r.status, Notes:r.notes
+    Date:safeCell(r.date), Vendor:safeCell(r.vendor), "Invoice #":safeCell(r.invoice), "Bill To":safeCell(r.billto),
+    "Job Site":safeCell(r.jobsite), City:safeCell(r.city), State:safeCell(r.state), Category:safeCell(r.category),
+    "Item/Description":safeCell(r.items), Subtotal:r.subtotal, Tax:r.tax, Fees:r.fees,
+    Total:r.total, Status:r.status, Notes:safeCell(r.notes)
   }));
   const ws = XLSX.utils.json_to_sheet(data);
   const wb = XLSX.utils.book_new();
@@ -560,4 +587,3 @@ loadRecords();
 </script>
 </body>
 </html>
-
