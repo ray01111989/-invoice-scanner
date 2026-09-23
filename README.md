@@ -32,6 +32,7 @@ create table invoices (
   state text,
   category text,
   status text,
+  items text,
   subtotal numeric,
   tax numeric,
   fees numeric,
@@ -44,6 +45,12 @@ create table invoices (
 -- keep row level security ON so no one can hit the table directly
 -- with the public anon key.
 alter table invoices enable row level security;
+```
+
+If you created the table earlier without the `items` column, add it:
+
+```sql
+alter table invoices add column if not exists items text;
 ```
 
 Then go to **Project Settings → API** and copy:
@@ -77,26 +84,30 @@ installed — it'll deploy directly.)
    - `ANTHROPIC_API_KEY`
    - `SUPABASE_URL`
    - `SUPABASE_SERVICE_KEY`
+   - `APP_ACCESS_KEY` — a long random password (see Security below)
 4. Deploy. Vercel gives you a URL like `invoice-scanner.vercel.app` —
-   that's your public link. Anyone who opens it on their phone can tap
-   "Take Photo" and it works the same as the version I showed you.
+   that's your public link. Open it on a phone, enter the access key when
+   asked, and tap "Take Photo".
 
 ## Step 4 — (Optional) custom domain
 
 Vercel → Project → Settings → Domains → add a domain you own and follow
 the DNS instructions it gives you.
 
-## Notes on cost and access
+## Security
 
-- **Anyone with the link can add and see entries** — this version has no
-  login. If you want it locked down, the simplest option is Vercel's
-  built-in password protection (Project → Settings → Deployment Protection,
-  paid tier) or I can add a simple shared-password gate to the page.
-- **Anthropic usage costs money per API call** — each photo scan is one
-  small vision request, typically a fraction of a cent with Claude Sonnet 5.
-  There's no cap by default, so if this link goes out to many people,
-  consider adding a simple rate limit or password gate so costs stay
-  predictable.
+- **Set `APP_ACCESS_KEY`.** When it is set, every API call must include it, and
+  the page asks for it once per browser tab. When it is NOT set, anyone with the
+  link can add, view, and delete records and spend your Anthropic credits, and the
+  server writes a warning to the logs. Generate a key with `openssl rand -base64 32`.
+- **Anthropic usage costs money per API call** — each photo scan is one small
+  vision request, typically a fraction of a cent. The access key is the main cost
+  control. For heavier exposure, also add rate limiting (for example Vercel's
+  Firewall rate-limit rules) and set a monthly spend limit in the Anthropic console.
+- **The Supabase service key bypasses row-level security.** It must stay in
+  server environment variables only. `api/records.js` validates every field and id
+  before writing, because it is the only gatekeeper for the table.
+- Uploaded photos are sent to Anthropic for reading and are not stored by this app.
 - Supabase's free tier comfortably handles thousands of invoice rows.
 
 ## Files in this project
@@ -105,7 +116,9 @@ the DNS instructions it gives you.
 api/
   extract.js   — server function: receives a photo, calls Anthropic, returns parsed fields
   records.js   — server function: list / create / delete invoice rows in Supabase
+lib/
+  auth.js      — shared access-key check used by both server functions
 public/
   index.html   — the whole frontend (camera capture, review form, log table)
-.env.example   — template for the three secrets above
+.env.example   — template for the four secrets above
 ```
